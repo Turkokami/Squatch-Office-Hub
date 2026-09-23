@@ -35,3 +35,28 @@ create table if not exists runs (
   status      text not null default 'ok',           -- ok | failed
   summary     text
 );
+
+-- ---------------------------------------------------------------------------
+-- SHUT THE SIDE DOOR. Read this before deciding to skip it.
+--
+-- Supabase publishes every table in the `public` schema through an automatic
+-- REST API, reachable with the project's anon key — a key designed to sit in
+-- browser code, so it is not a secret. Without row level security, that API
+-- will hand over these two tables to anyone who has it, going around the app,
+-- the login screen and the bot key entirely. It is the same hole that was in
+-- the app's own GET routes, in a second place.
+--
+-- Enabling RLS with NO policies denies every request that arrives through
+-- that API. It does not affect this app: it connects over DATABASE_URL as the
+-- database owner, and the owner bypasses RLS. That is the whole trick —
+-- closed to the public API, open to the thing holding the password.
+--
+-- ON NEON OR VERCEL POSTGRES there is no such REST API, so this is belt and
+-- braces rather than a fix. It is still harmless, for the same reason.
+--
+-- THE ONE WAY THIS BITES: if you ever point the app at a NON-owner role, RLS
+-- will apply to it and every query comes back empty rather than failing
+-- loudly. If the board suddenly shows nothing and /api/health says the
+-- database is fine, this is the first thing to check.
+alter table items enable row level security;
+alter table runs  enable row level security;
