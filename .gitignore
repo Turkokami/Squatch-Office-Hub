@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+build/
+
+# Secrets. DATABASE_URL, AUTH_SECRET, BOT_API_KEY and OFFICE_USERS belong in
+# Vercel's environment variables and in a local .env.local that never leaves
+# this machine. A password hash is not a password, but OFFICE_USERS is still
+# the list of who can sign in — keep it out of the repo even so.
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+.vercel

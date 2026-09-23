@@ -1,0 +1,17 @@
+{
+  "name": "squatch-dispatch",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "hash": "node scripts/hash-password.mjs"
+  },
+  "dependencies": {
+    "next": "^15.5.26",
+    "pg": "8.13.1",
+    "react": "^19.0.8",
+    "react-dom": "^19.0.8"
+  }
+}
