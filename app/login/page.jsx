@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
@@ -17,7 +18,7 @@ export default function LoginPage() {
     const res = await fetch("/api/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, remember }),
     }).catch(() => null);
     setBusy(false);
     if (res && res.ok) {
@@ -56,6 +57,15 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
+        </label>
+        <label htmlFor="remember" className="remember">
+          <input
+            id="remember"
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+          />
+          Keep me signed in on this computer for 30 days
         </label>
         {error ? <p className="err">{error}</p> : null}
         <button type="submit" disabled={busy}>

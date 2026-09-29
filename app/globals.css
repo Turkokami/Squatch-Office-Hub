@@ -137,3 +137,5 @@ details.draft .body { padding: 0 12px 12px; font-family: var(--mono); font-size:
 .login input { background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 9px 10px; }
 .login button { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); padding: 9px; border-radius: 3px; cursor: pointer; font-family: var(--mono); letter-spacing: 0.04em; }
 .login .err { color: var(--rust); font-size: 0.85rem; margin: 0; }
+.login label.remember { flex-direction: row; align-items: center; gap: 8px; }
+.login label.remember input { width: auto; padding: 0; }

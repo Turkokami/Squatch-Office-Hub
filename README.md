@@ -6,6 +6,29 @@ write to it over HTTP with a shared key.
 
 ---
 
+## How the bots' reports get here: the hourly artifact sync (29 Sep 2026)
+
+Claude's cloud network refuses connections to this site, so the cloud-scheduled
+bots can't POST here. They keep filing into the Claude artifact board
+("Squatch-Bot Dispatch", its shared database). A scheduled task bound to the
+office PC runs hourly and, using Chrome signed in to this app, carries changes
+both ways:
+
+- `GET  /api/sync`: the artifact version last seen for each item
+- `POST /api/sync`: new or changed artifact items and the runs rail come in;
+  office changes that the artifact still needs go out (`push`)
+- `POST /api/sync/ack`: confirms those changes were written to the artifact
+
+The merge logic and conflict rules are in `lib/sync.js`. The first call adds
+three columns to `items` (`sync_base`, `artifact_version`, `synced_at`) by itself.
+The sync uses the office session, not the bot key, so sign in on the PC with
+"Keep me signed in on this computer" (30 days). When that runs out, the sync
+reports "not signed in" until someone signs in again.
+
+`POST /api/import` (bot key) is a one-off full copy, kept for emergencies.
+
+---
+
 ## What changed on intake — 23 Sep 2026
 
 Four things were fixed before this was put anywhere reachable. They are

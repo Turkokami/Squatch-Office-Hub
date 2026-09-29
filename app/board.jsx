@@ -9,7 +9,7 @@ const BOTS = [
   { key: "obiwan", name: "Obi-Wan", sign: "Content Bot" },
   { key: "chewbacca", name: "Chewbacca", sign: "Star Bot" },
   { key: "leia", name: "Leia", sign: "Map Bot" },
-  { key: "bobafett", name: "Boba Fett", sign: "Lead Bot" },
+  { key: "sarlac", name: "SARLAC", sign: "Lead Bot" },
 ];
 
 const TABS = [

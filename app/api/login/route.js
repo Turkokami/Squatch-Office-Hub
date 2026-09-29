@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { verifyPassword, makeSession, COOKIE_NAME, COOKIE_MAX_AGE } from "../../../lib/auth";
+import { verifyPassword, makeSession, COOKIE_NAME, COOKIE_MAX_AGE, REMEMBER_MAX_AGE_SECONDS } from "../../../lib/auth";
 
 /**
  * A SPEED LIMIT ON GUESSING. This route is the front door and it had no limit
@@ -54,13 +54,14 @@ export async function POST(req) {
   }
 
   ATTEMPTS.delete(ip);
+  const maxAge = body.remember === true ? REMEMBER_MAX_AGE_SECONDS : COOKIE_MAX_AGE;
   const res = NextResponse.json({ ok: true, name: user.name });
-  res.cookies.set(COOKIE_NAME, makeSession(user), {
+  res.cookies.set(COOKIE_NAME, makeSession(user, maxAge), {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
     path: "/",
-    maxAge: COOKIE_MAX_AGE,
+    maxAge,
   });
   return res;
 }
