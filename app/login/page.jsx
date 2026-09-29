@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { api } from "../../lib/base";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,7 +16,7 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const res = await fetch("/api/login", {
+    const res = await fetch(api("login"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ username, password, remember }),

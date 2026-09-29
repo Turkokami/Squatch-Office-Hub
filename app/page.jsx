@@ -16,6 +16,6 @@ export const dynamic = "force-dynamic";
  */
 export default async function Page() {
   const session = readSession((await cookies()).get(COOKIE_NAME)?.value);
-  if (!session) redirect("/login");
+  if (!session) redirect("/login/");
   return <Board who={session.name} />;
 }

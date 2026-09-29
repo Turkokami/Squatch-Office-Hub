@@ -53,9 +53,14 @@ export function middleware(req) {
 
   if (req.cookies.get(COOKIE_NAME)) return NextResponse.next();
 
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  return NextResponse.redirect(url);
+  /* A RELATIVE redirect, on purpose. Behind the website's rewrite this app
+     sees its own vercel.app hostname, and NextResponse.redirect() would write
+     that into the Location header, sending staff off sasquatchpestcontrol.com.
+     A path-only Location keeps the browser on whatever domain it came in on. */
+  return new NextResponse(null, {
+    status: 307,
+    headers: { Location: "/office/login/" },
+  });
 }
 
 export const config = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, BASE } from "../lib/base";
 
 const BOTS = [
   { key: "yoda", name: "Yoda", sign: "Gorilla Bot" },
@@ -75,8 +76,8 @@ export default function Board({ who }) {
   const load = useCallback(async () => {
     try {
       const [a, b] = await Promise.all([
-        fetch("/api/items", { cache: "no-store" }),
-        fetch("/api/runs", { cache: "no-store" }),
+        fetch(api("items"), { cache: "no-store" }),
+        fetch(api("runs"), { cache: "no-store" }),
       ]);
       if (a.ok) setItems((await a.json()).items || []);
       if (b.ok) setRuns((await b.json()).runs || []);
@@ -101,7 +102,7 @@ export default function Board({ who }) {
     if (busy[id]) return;
     setBusy((s) => ({ ...s, [id]: true }));
     try {
-      const res = await fetch(`/api/items/${encodeURIComponent(id)}`, {
+      const res = await fetch(api(`items/${encodeURIComponent(id)}`), {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -196,8 +197,8 @@ export default function Board({ who }) {
             <button
               className="btn"
               onClick={async () => {
-                await fetch("/api/logout", { method: "POST" });
-                window.location.href = "/login";
+                await fetch(api("logout"), { method: "POST" });
+                window.location.href = `${BASE}/login/`;
               }}
             >
               Sign out

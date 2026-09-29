@@ -60,7 +60,7 @@ export async function POST(req) {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
-    path: "/",
+    path: "/office",
     maxAge,
   });
   return res;
