@@ -139,3 +139,17 @@ details.draft .body { padding: 0 12px 12px; font-family: var(--mono); font-size:
 .login .err { color: var(--rust); font-size: 0.85rem; margin: 0; }
 .login label.remember { flex-direction: row; align-items: center; gap: 8px; }
 .login label.remember input { width: auto; padding: 0; }
+
+/* office → bot task box (shows when exactly one bot chip is selected) */
+.taskbox { display: flex; flex-direction: column; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: 3px; padding: 14px 16px; margin-bottom: 4px; }
+.taskbox > label { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink); }
+.taskbox > label span { color: var(--ink-faint); text-transform: none; letter-spacing: 0; }
+.taskbox textarea { width: 100%; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 9px 10px; font-size: 0.92rem; resize: vertical; }
+.taskrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.taskrow .urgent { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-soft); }
+.taskrow .hint { font-size: 0.8rem; color: var(--ink-faint); }
+.item.k-task .stripe { background: var(--ink-soft); }
+.tag.task { background: var(--panel-2); color: var(--ink); }
+.taskbox .duty { margin: 2px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 0.86rem; color: var(--ink-soft); max-width: 80ch; }
+.taskbox .duty b { color: var(--ink); font-weight: 600; }
+.taskbox .duty .when { color: var(--ink-faint); }

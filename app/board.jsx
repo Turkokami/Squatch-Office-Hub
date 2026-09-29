@@ -3,14 +3,37 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, BASE } from "../lib/base";
 
+// `duty` and `when` show under a bot's task box so staff know what each one
+// is for. Keep them in step with the bots' scheduled-task instructions.
 const BOTS = [
-  { key: "yoda", name: "Yoda", sign: "Gorilla Bot" },
-  { key: "r2d2", name: "R2-D2", sign: "Dispatch Bot" },
-  { key: "vader", name: "Vader", sign: "Ledger Bot" },
-  { key: "obiwan", name: "Obi-Wan", sign: "Content Bot" },
-  { key: "chewbacca", name: "Chewbacca", sign: "Star Bot" },
-  { key: "leia", name: "Leia", sign: "Map Bot" },
-  { key: "sarlac", name: "SARLAC", sign: "Lead Bot" },
+  {
+    key: "yoda", name: "Yoda", sign: "Gorilla Bot", when: "Daily 5:30 PM · monthly pass on the 21st",
+    duty: "Works inside GorillaDesk. Audits each day's new rodent and ant accounts: books the one-week trap check, unlocks follow-up jobs and prices them from the tech's Top Note. Once a month it re-routes schedules by zip and confirms appointments.",
+  },
+  {
+    key: "r2d2", name: "R2-D2", sign: "Dispatch Bot", when: "Weekdays 6:30 AM",
+    duty: "Works the office inbox (sasquatchpest@gmail.com). Sorts new mail, labels leads, drafts replies for approval, flags leads waiting 24+ hours, and sends the morning brief with the weather and money notes.",
+  },
+  {
+    key: "vader", name: "Vader", sign: "Ledger Bot", when: "Fridays 8 AM · month-end on the 1st",
+    duty: "Watches the books in QuickBooks (read-only). Reports what went overdue and what got paid, drafts collection emails for approval, and does the month-end close review.",
+  },
+  {
+    key: "obiwan", name: "Obi-Wan", sign: "Content Bot", when: "Saturdays 8 AM",
+    duty: "Writes the week's social posts in Pest AI for Facebook, Instagram, Nextdoor, TikTok/YouTube and LinkedIn, and schedules them. Checks the recurring post series and re-verifies every link.",
+  },
+  {
+    key: "chewbacca", name: "Chewbacca", sign: "Star Bot", when: "Wednesdays 9 AM",
+    duty: "Reviews and reputation. Finds new customer reviews, drafts replies for approval, and posts the replies you approve.",
+  },
+  {
+    key: "leia", name: "Leia", sign: "Map Bot", when: "Thursdays 9 AM",
+    duty: "Google Business Profile. Checks the profile, services and address listings across the web, tracks map rankings, and drafts the weekly Google post for approval.",
+  },
+  {
+    key: "sarlac", name: "SARLAC", sign: "Lead Bot", when: "Tuesdays 9 AM",
+    duty: "Commercial sales for Whatcom and Skagit. Finds property managers, restaurants and other commercial prospects from public sources, keeps the pipeline, drafts outreach for approval, and lists who to call back.",
+  },
 ];
 
 const TABS = [
@@ -72,6 +95,9 @@ export default function Board({ who }) {
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState({});
   const [live, setLive] = useState(false);
+  const [task, setTask] = useState("");
+  const [taskUrgent, setTaskUrgent] = useState(false);
+  const [taskState, setTaskState] = useState({ busy: false, msg: "", ok: true });
 
   const load = useCallback(async () => {
     try {
@@ -177,6 +203,40 @@ export default function Board({ who }) {
     done: ["Nothing cleared yet", "Items you finish stay here so you can look back at what was decided."],
   }[view];
 
+  // One bot selected → that bot gets a message box at the top.
+  const pickedKeys = Object.keys(picked);
+  const focusBot = pickedKeys.length === 1 ? BOTS.find((b) => b.key === pickedKeys[0]) : null;
+
+  async function sendTask(e) {
+    e.preventDefault();
+    const text = task.trim();
+    if (!focusBot || !text || taskState.busy) return;
+    setTaskState({ busy: true, msg: "", ok: true });
+    try {
+      const res = await fetch(api("tasks"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bot: focusBot.key, text, urgent: taskUrgent }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.item) {
+        setItems((list) => [data.item, ...list]);
+        setTask("");
+        setTaskUrgent(false);
+        setView("open");
+        setTaskState({
+          busy: false,
+          ok: true,
+          msg: `Sent. ${focusBot.name} picks it up at the next sync, on the hour, and answers on the task card below.`,
+        });
+      } else {
+        setTaskState({ busy: false, ok: false, msg: data.error || "Couldn't send that. Try again." });
+      }
+    } catch {
+      setTaskState({ busy: false, ok: false, msg: "Couldn't reach the board. Check the connection and try again." });
+    }
+  }
+
   const assigneeNames = [...new Set(items.map((i) => i.assignee).filter(Boolean))];
 
   return (
@@ -258,6 +318,51 @@ export default function Board({ who }) {
             </button>
           ))}
         </div>
+
+        {focusBot ? (
+          <form className="taskbox" onSubmit={sendTask}>
+            <label htmlFor="taskText">
+              Give {focusBot.name} a job <span>· {focusBot.sign}</span>
+            </label>
+            <textarea
+              id="taskText"
+              rows={3}
+              placeholder={`Tell ${focusBot.name} what to do, in plain words. It runs outside the normal schedule.`}
+              value={task}
+              onChange={(e) => {
+                setTask(e.target.value);
+                if (taskState.msg) setTaskState({ busy: false, msg: "", ok: true });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendTask(e);
+              }}
+            />
+            <div className="taskrow">
+              <label className="urgent">
+                <input
+                  type="checkbox"
+                  checked={taskUrgent}
+                  onChange={(e) => setTaskUrgent(e.target.checked)}
+                />
+                Urgent
+              </label>
+              <button className="btn go" type="submit" disabled={taskState.busy || !task.trim()}>
+                {taskState.busy ? "Sending…" : `Send to ${focusBot.name}`}
+              </button>
+              {taskState.msg ? (
+                <span className={`verdict ${taskState.ok ? "ok" : "no"}`}>{taskState.msg}</span>
+              ) : (
+                <span className="hint">
+                  Anything that would send, post, charge or change a price still comes back here for your approval first.
+                </span>
+              )}
+            </div>
+            <p className="duty">
+              <b>What {focusBot.name} does:</b> {focusBot.duty}
+              <span className="when"> Scheduled: {focusBot.when}.</span>
+            </p>
+          </form>
+        ) : null}
 
         <div className="board">
           <section className="queue">
@@ -426,6 +531,10 @@ export default function Board({ who }) {
               <div className="row">
                 <span className="sw" style={{ background: "var(--rust)" }} />
                 <span><b>Alert</b> — something is wrong and won&apos;t fix itself</span>
+              </div>
+              <div className="row">
+                <span className="sw" style={{ background: "var(--ink-soft)" }} />
+                <span><b>Task</b> — a job the office gave a bot; its answer lands on the card</span>
               </div>
               <div className="row">
                 <span className="sw" style={{ background: "var(--slate)" }} />

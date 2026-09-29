@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { query } from "../../../lib/db";
+import { query, rowToItem } from "../../../lib/db";
 import { callerFrom } from "../../../lib/auth";
 import {
   ensureSchema,
@@ -107,6 +107,35 @@ export async function POST(req) {
     }
   }
 
+  // Tasks the office wrote here (no artifact copy yet). The sync task creates
+  // each one on the artifact board, starts that bot's run with the task text
+  // (fire: true), then acks with the new artifact version, exactly like a push.
+  const created = await query(
+    "select * from items where artifact_version is null order by created_at asc limit 50"
+  );
+  const create = created.rows.map((row) => {
+    const it = rowToItem(row);
+    const s = forArtifact(shared(it));
+    return {
+      id: it.id,
+      bot: it.bot,
+      fire: it.kind === "task" && s.status === "open",
+      task: it.kind === "task" ? (it.comments?.[0]?.text || it.title) : null,
+      data: {
+        bot: it.bot,
+        botName: it.botName,
+        kind: it.kind,
+        priority: it.priority,
+        title: it.title,
+        detail: it.detail,
+        createdAt: new Date(it.createdAt).toISOString(),
+        source: "office",
+        ...s,
+      },
+      fields: s,
+    };
+  });
+
   for (const r of runs) {
     const id = r && (r.id || r.bot);
     const d = (r && r.data) || r || {};
@@ -128,5 +157,5 @@ export async function POST(req) {
     stats.runs++;
   }
 
-  return NextResponse.json({ push, stats });
+  return NextResponse.json({ push, create, stats });
 }
