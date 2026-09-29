@@ -1,0 +1,706 @@
+From 1032c1aca411c883496316b5371f24980fc2596b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 29 Sep 2026 11:39:46 -0700
+Subject: [PATCH 1/2] Add /api/import for moving the artifact board over;
+ SARLAC replaces Boba Fett
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F1Svc3RCN9LWzgb4oDXSCZ
+---
+ app/api/import/route.js | 109 ++++++++++++++++++++++++++++++++++++++++
+ app/board.jsx           |   2 +-
+ 2 files changed, 110 insertions(+), 1 deletion(-)
+ create mode 100644 app/api/import/route.js
+
+diff --git a/app/api/import/route.js b/app/api/import/route.js
+new file mode 100644
+index 0000000..0a363e7
+--- /dev/null
++++ b/app/api/import/route.js
+@@ -0,0 +1,109 @@
++import { NextResponse } from "next/server";
++import { query } from "../../../lib/db";
++import { checkBotKey } from "../../../lib/auth";
++
++/**
++ * POST /api/import — one-time move of the Claude artifact board into this app.
++ *
++ * Unlike POST /api/items (which files a NEW item and always starts it open),
++ * this keeps an item's full state: status, verdict, acked, assignee, snooze,
++ * closed and created times. Bot key only. Upserts by id, so running it twice
++ * is harmless.
++ *
++ * Body: { items: [ {id, bot, botName, kind, priority, title, detail, draft,
++ *                   draftChannel, status, verdict, verdictBy, verdictAt,
++ *                   assignee, acked, ackedBy, snoozeUntil, closedAt,
++ *                   createdAt, comments} ],
++ *         runs:  [ {bot, botName, lastRunAt, status, summary} ] }
++ */
++const KINDS = new Set(["decision", "draft", "alert", "info"]);
++const STATUSES = new Set(["open", "snoozed", "done"]);
++const VERDICTS = new Set(["approved", "rejected"]);
++
++function ts(v) {
++  if (!v) return null;
++  const t = Date.parse(v);
++  return isNaN(t) ? null : new Date(t).toISOString();
++}
++
++export async function POST(req) {
++  if (!checkBotKey(req)) {
++    return NextResponse.json({ error: "bad bot key" }, { status: 401 });
++  }
++  const body = await req.json().catch(() => null);
++  const items = Array.isArray(body?.items) ? body.items.slice(0, 1000) : [];
++  const runs = Array.isArray(body?.runs) ? body.runs.slice(0, 50) : [];
++
++  let itemCount = 0;
++  const skipped = [];
++  for (const it of items) {
++    if (!it || !it.id || !it.bot || !it.title) {
++      skipped.push(it?.id || null);
++      continue;
++    }
++    await query(
++      `insert into items
++         (id, bot, bot_name, kind, priority, title, detail, draft, draft_channel,
++          status, verdict, verdict_by, verdict_at, assignee, acked, acked_by,
++          snooze_until, closed_at, created_at, updated_at, comments)
++       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
++               coalesce($19::timestamptz, now()), now(), $20::jsonb)
++       on conflict (id) do update set
++         bot = excluded.bot, bot_name = excluded.bot_name, kind = excluded.kind,
++         priority = excluded.priority, title = excluded.title,
++         detail = excluded.detail, draft = excluded.draft,
++         draft_channel = excluded.draft_channel, status = excluded.status,
++         verdict = excluded.verdict, verdict_by = excluded.verdict_by,
++         verdict_at = excluded.verdict_at, assignee = excluded.assignee,
++         acked = excluded.acked, acked_by = excluded.acked_by,
++         snooze_until = excluded.snooze_until, closed_at = excluded.closed_at,
++         created_at = excluded.created_at, comments = excluded.comments,
++         updated_at = now()`,
++      [
++        String(it.id),
++        String(it.bot),
++        it.botName || it.bot,
++        KINDS.has(it.kind) ? it.kind : "decision",
++        it.priority === "high" ? "high" : "normal",
++        String(it.title),
++        it.detail || null,
++        it.draft || null,
++        it.draftChannel || null,
++        STATUSES.has(it.status) ? it.status : "open",
++        VERDICTS.has(it.verdict) ? it.verdict : null,
++        it.verdictBy || null,
++        ts(it.verdictAt),
++        it.assignee || null,
++        Boolean(it.acked),
++        it.ackedBy || null,
++        ts(it.snoozeUntil),
++        ts(it.closedAt),
++        ts(it.createdAt),
++        JSON.stringify(Array.isArray(it.comments) ? it.comments.slice(-40) : []),
++      ]
++    );
++    itemCount++;
++  }
++
++  let runCount = 0;
++  for (const r of runs) {
++    if (!r || !r.bot) continue;
++    await query(
++      `insert into runs (bot, bot_name, last_run_at, status, summary)
++       values ($1, $2, coalesce($3::timestamptz, now()), $4, $5)
++       on conflict (bot) do update set
++         bot_name = excluded.bot_name, last_run_at = excluded.last_run_at,
++         status = excluded.status, summary = excluded.summary`,
++      [
++        String(r.bot),
++        r.botName || r.bot,
++        ts(r.lastRunAt),
++        r.status === "failed" ? "failed" : "ok",
++        r.summary || null,
++      ]
++    );
++    runCount++;
++  }
++
++  return NextResponse.json({ items: itemCount, runs: runCount, skipped });
++}
+diff --git a/app/board.jsx b/app/board.jsx
+index 283ea03..061072b 100644
+--- a/app/board.jsx
++++ b/app/board.jsx
+@@ -9,7 +9,7 @@ const BOTS = [
+   { key: "obiwan", name: "Obi-Wan", sign: "Content Bot" },
+   { key: "chewbacca", name: "Chewbacca", sign: "Star Bot" },
+   { key: "leia", name: "Leia", sign: "Map Bot" },
+-  { key: "bobafett", name: "Boba Fett", sign: "Lead Bot" },
++  { key: "sarlac", name: "SARLAC", sign: "Lead Bot" },
+ ];
+ 
+ const TABS = [
+-- 
+2.43.0
+
+
+From 7d85dea54ce283aef343858856afebe1964bb1ff Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 29 Sep 2026 12:18:08 -0700
+Subject: [PATCH 2/2] Hourly artifact sync: /api/sync + ack with three-way
+ merge, 30-day remember-me sign-in
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F1Svc3RCN9LWzgb4oDXSCZ
+---
+ README.md                 |  23 +++++
+ app/api/login/route.js    |   7 +-
+ app/api/sync/ack/route.js |  30 ++++++
+ app/api/sync/route.js     | 132 ++++++++++++++++++++++++
+ app/globals.css           |   2 +
+ app/login/page.jsx        |  12 ++-
+ lib/auth.js               |   9 +-
+ lib/sync.js               | 211 ++++++++++++++++++++++++++++++++++++++
+ 8 files changed, 420 insertions(+), 6 deletions(-)
+ create mode 100644 app/api/sync/ack/route.js
+ create mode 100644 app/api/sync/route.js
+ create mode 100644 lib/sync.js
+
+diff --git a/README.md b/README.md
+index 73be788..e843c34 100644
+--- a/README.md
++++ b/README.md
+@@ -6,6 +6,29 @@ write to it over HTTP with a shared key.
+ 
+ ---
+ 
++## How the bots' reports get here: the hourly artifact sync (29 Sep 2026)
++
++Claude's cloud network refuses connections to this site, so the cloud-scheduled
++bots can't POST here. They keep filing into the Claude artifact board
++("Squatch-Bot Dispatch", its shared database). A scheduled task bound to the
++office PC runs hourly and, using Chrome signed in to this app, carries changes
++both ways:
++
++- `GET  /api/sync`: the artifact version last seen for each item
++- `POST /api/sync`: new or changed artifact items and the runs rail come in;
++  office changes that the artifact still needs go out (`push`)
++- `POST /api/sync/ack`: confirms those changes were written to the artifact
++
++The merge logic and conflict rules are in `lib/sync.js`. The first call adds
++three columns to `items` (`sync_base`, `artifact_version`, `synced_at`) by itself.
++The sync uses the office session, not the bot key, so sign in on the PC with
++"Keep me signed in on this computer" (30 days). When that runs out, the sync
++reports "not signed in" until someone signs in again.
++
++`POST /api/import` (bot key) is a one-off full copy, kept for emergencies.
++
++---
++
+ ## What changed on intake — 23 Sep 2026
+ 
+ Four things were fixed before this was put anywhere reachable. They are
+diff --git a/app/api/login/route.js b/app/api/login/route.js
+index c03b3a1..f75f0c8 100644
+--- a/app/api/login/route.js
++++ b/app/api/login/route.js
+@@ -1,5 +1,5 @@
+ import { NextResponse } from "next/server";
+-import { verifyPassword, makeSession, COOKIE_NAME, COOKIE_MAX_AGE } from "../../../lib/auth";
++import { verifyPassword, makeSession, COOKIE_NAME, COOKIE_MAX_AGE, REMEMBER_MAX_AGE_SECONDS } from "../../../lib/auth";
+ 
+ /**
+  * A SPEED LIMIT ON GUESSING. This route is the front door and it had no limit
+@@ -54,13 +54,14 @@ export async function POST(req) {
+   }
+ 
+   ATTEMPTS.delete(ip);
++  const maxAge = body.remember === true ? REMEMBER_MAX_AGE_SECONDS : COOKIE_MAX_AGE;
+   const res = NextResponse.json({ ok: true, name: user.name });
+-  res.cookies.set(COOKIE_NAME, makeSession(user), {
++  res.cookies.set(COOKIE_NAME, makeSession(user, maxAge), {
+     httpOnly: true,
+     secure: true,
+     sameSite: "lax",
+     path: "/",
+-    maxAge: COOKIE_MAX_AGE,
++    maxAge,
+   });
+   return res;
+ }
+diff --git a/app/api/sync/ack/route.js b/app/api/sync/ack/route.js
+new file mode 100644
+index 0000000..6e7d5e4
+--- /dev/null
++++ b/app/api/sync/ack/route.js
+@@ -0,0 +1,30 @@
++import { NextResponse } from "next/server";
++import { query } from "../../../../lib/db";
++import { callerFrom } from "../../../../lib/auth";
++import { ensureSchema, shared } from "../../../../lib/sync";
++
++export const dynamic = "force-dynamic";
++
++// POST /api/sync/ack — the sync task wrote these office changes into the
++// artifact. Body: { acks: [{ id, version, fields }] }, where version is the
++// artifact document's NEW version and fields are exactly what was written.
++export async function POST(req) {
++  if (!callerFrom(req)) {
++    return NextResponse.json({ error: "not signed in" }, { status: 401 });
++  }
++  await ensureSchema();
++  const body = await req.json().catch(() => null);
++  const acks = Array.isArray(body && body.acks) ? body.acks.slice(0, 1000) : [];
++  let n = 0;
++  for (const k of acks) {
++    const version = parseInt(k && k.version, 10);
++    if (!k || !k.id || !k.fields || !Number.isFinite(version)) continue;
++    const r = await query(
++      `update items set sync_base = $2::jsonb, artifact_version = $3, synced_at = now()
++       where id = $1`,
++      [String(k.id), JSON.stringify(shared(k.fields)), version]
++    );
++    n += r.rowCount || 0;
++  }
++  return NextResponse.json({ acked: n });
++}
+diff --git a/app/api/sync/route.js b/app/api/sync/route.js
+new file mode 100644
+index 0000000..05e6029
+--- /dev/null
++++ b/app/api/sync/route.js
+@@ -0,0 +1,132 @@
++import { NextResponse } from "next/server";
++import { query } from "../../../lib/db";
++import { callerFrom } from "../../../lib/auth";
++import {
++  ensureSchema,
++  shared,
++  sharedFromRow,
++  sameShared,
++  merge3,
++  content,
++  writeRow,
++  forArtifact,
++} from "../../../lib/sync";
++
++export const dynamic = "force-dynamic";
++
++/*
++ * The hourly artifact sync. See lib/sync.js for how the two sides are merged.
++ * Called from Chrome on the office PC while signed in, so it rides the normal
++ * office session. No key has to live in the task's instructions.
++ */
++
++// GET /api/sync → the artifact version this app last saw for each item, so the
++// sync task sends only the items that changed since.
++export async function GET(req) {
++  if (!callerFrom(req)) {
++    return NextResponse.json({ error: "not signed in" }, { status: 401 });
++  }
++  await ensureSchema();
++  const { rows } = await query(
++    "select id, artifact_version from items where artifact_version is not null"
++  );
++  const versions = {};
++  for (const r of rows) versions[r.id] = r.artifact_version;
++  return NextResponse.json({ versions });
++}
++
++// POST /api/sync
++// Body: { items: [{ id, version, data }], runs: [{ id, data }] }
++//   items: artifact documents that are new or whose version changed
++//   runs:  the artifact's runs collection
++// Returns: { push: [{ id, version, fields }], stats }
++//   push: office changes to write into the artifact (update, pinned to
++//         `version`), then confirm with POST /api/sync/ack.
++export async function POST(req) {
++  if (!callerFrom(req)) {
++    return NextResponse.json({ error: "not signed in" }, { status: 401 });
++  }
++  await ensureSchema();
++  const body = await req.json().catch(() => null);
++  if (!body || typeof body !== "object") {
++    return NextResponse.json({ error: "send JSON: { items, runs }" }, { status: 400 });
++  }
++  const incoming = Array.isArray(body.items) ? body.items.slice(0, 1000) : [];
++  const runs = Array.isArray(body.runs) ? body.runs.slice(0, 50) : [];
++
++  const stats = { received: 0, created: 0, updated: 0, skipped: 0, runs: 0 };
++  const push = [];
++  const seen = new Set();
++
++  for (const doc of incoming) {
++    const id = doc && doc.id;
++    const data = doc && doc.data;
++    const version = parseInt(doc && doc.version, 10);
++    if (!id || !data || typeof data !== "object" || !Number.isFinite(version)) {
++      stats.skipped++;
++      continue;
++    }
++    if (data.example) {
++      stats.skipped++;
++      continue;
++    }
++    stats.received++;
++    seen.add(String(id));
++
++    const c = content(id, data);
++    const a = shared(data);
++    const existing = await query("select * from items where id = $1", [c.id]);
++
++    if (!existing.rows.length) {
++      await writeRow(c, a, { base: a, version });
++      stats.created++;
++      continue;
++    }
++
++    const row = existing.rows[0];
++    const v = sharedFromRow(row);
++    const base = row.sync_base ? shared(row.sync_base) : v;
++    const merged = merge3(base, a, v);
++    const agreed = sameShared(merged, a);
++    // Move the base only when the artifact already matches; otherwise wait
++    // for the ack, so a failed write is retried rather than forgotten.
++    await writeRow(c, merged, { base: agreed ? merged : base, version });
++    stats.updated++;
++    if (!agreed) push.push({ id: c.id, version, fields: forArtifact(merged) });
++  }
++
++  // Office changes on items the artifact didn't send (unchanged there).
++  const { rows } = await query(
++    "select * from items where artifact_version is not null and sync_base is not null"
++  );
++  for (const row of rows) {
++    if (seen.has(row.id)) continue;
++    const v = sharedFromRow(row);
++    if (!sameShared(v, shared(row.sync_base))) {
++      push.push({ id: row.id, version: row.artifact_version, fields: forArtifact(v) });
++    }
++  }
++
++  for (const r of runs) {
++    const id = r && (r.id || r.bot);
++    const d = (r && r.data) || r || {};
++    if (!id) continue;
++    await query(
++      `insert into runs (bot, bot_name, last_run_at, status, summary)
++       values ($1, $2, coalesce($3::timestamptz, now()), $4, $5)
++       on conflict (bot) do update set
++         bot_name = excluded.bot_name, last_run_at = excluded.last_run_at,
++         status = excluded.status, summary = excluded.summary`,
++      [
++        String(id),
++        String(d.botName || d.bot || id),
++        d.lastRunAt || null,
++        d.status === "failed" ? "failed" : "ok",
++        d.summary || null,
++      ]
++    );
++    stats.runs++;
++  }
++
++  return NextResponse.json({ push, stats });
++}
+diff --git a/app/globals.css b/app/globals.css
+index a0421a5..401664a 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -137,3 +137,5 @@ details.draft .body { padding: 0 12px 12px; font-family: var(--mono); font-size:
+ .login input { background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 9px 10px; }
+ .login button { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); padding: 9px; border-radius: 3px; cursor: pointer; font-family: var(--mono); letter-spacing: 0.04em; }
+ .login .err { color: var(--rust); font-size: 0.85rem; margin: 0; }
++.login label.remember { flex-direction: row; align-items: center; gap: 8px; }
++.login label.remember input { width: auto; padding: 0; }
+diff --git a/app/login/page.jsx b/app/login/page.jsx
+index 5b8d35a..9abcf79 100644
+--- a/app/login/page.jsx
++++ b/app/login/page.jsx
+@@ -9,6 +9,7 @@ export default function LoginPage() {
+   const [password, setPassword] = useState("");
+   const [error, setError] = useState("");
+   const [busy, setBusy] = useState(false);
++  const [remember, setRemember] = useState(false);
+ 
+   async function submit(e) {
+     e.preventDefault();
+@@ -17,7 +18,7 @@ export default function LoginPage() {
+     const res = await fetch("/api/login", {
+       method: "POST",
+       headers: { "content-type": "application/json" },
+-      body: JSON.stringify({ username, password }),
++      body: JSON.stringify({ username, password, remember }),
+     }).catch(() => null);
+     setBusy(false);
+     if (res && res.ok) {
+@@ -57,6 +58,15 @@ export default function LoginPage() {
+             required
+           />
+         </label>
++        <label htmlFor="remember" className="remember">
++          <input
++            id="remember"
++            type="checkbox"
++            checked={remember}
++            onChange={(e) => setRemember(e.target.checked)}
++          />
++          Keep me signed in on this computer for 30 days
++        </label>
+         {error ? <p className="err">{error}</p> : null}
+         <button type="submit" disabled={busy}>
+           {busy ? "Signing in…" : "Sign in"}
+diff --git a/lib/auth.js b/lib/auth.js
+index 24c205a..b013dcb 100644
+--- a/lib/auth.js
++++ b/lib/auth.js
+@@ -4,6 +4,10 @@ import crypto from "node:crypto";
+ // see the note there. Change it in both places, or sessions stop being read.
+ const COOKIE = "squatch_session";
+ const MAX_AGE = 60 * 60 * 12; // 12 hours
++// "Keep me signed in on this computer" — for the office PC that runs the hourly
++// artifact sync in Chrome. Signing in once a month beats a sync that dies
++// every night when a 12-hour cookie runs out.
++const REMEMBER_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+ 
+ // OFFICE_USERS is a JSON array set in the hosting environment, e.g.
+ // [{"user":"kristofer","name":"Kristofer","hash":"<salt>:<key>"}]
+@@ -38,9 +42,9 @@ function sign(value) {
+     .digest("base64url");
+ }
+ 
+-export function makeSession(user) {
++export function makeSession(user, maxAge = MAX_AGE) {
+   const body = Buffer.from(
+-    JSON.stringify({ u: user.user, n: user.name, exp: Date.now() + MAX_AGE * 1000 })
++    JSON.stringify({ u: user.user, n: user.name, exp: Date.now() + maxAge * 1000 })
+   ).toString("base64url");
+   return body + "." + sign(body);
+ }
+@@ -64,6 +68,7 @@ export function readSession(token) {
+ 
+ export const COOKIE_NAME = COOKIE;
+ export const COOKIE_MAX_AGE = MAX_AGE;
++export const REMEMBER_MAX_AGE_SECONDS = REMEMBER_MAX_AGE;
+ 
+ /**
+  * WHO IS ASKING — the single answer every route and the board page uses.
+diff --git a/lib/sync.js b/lib/sync.js
+new file mode 100644
+index 0000000..3ba971e
+--- /dev/null
++++ b/lib/sync.js
+@@ -0,0 +1,211 @@
++import { query, rowToItem } from "./db";
++
++/**
++ * TWO BOARDS, ONE SET OF DECISIONS.
++ *
++ * The bots file into the Claude artifact board (its database is the only thing
++ * a cloud-scheduled bot can reach). The office works here. An hourly task on
++ * the office PC carries changes both ways through /api/sync:
++ *
++ *   artifact → here   new items, the bots' text, bot comments, bots closing
++ *                     items, and the "last run" rail
++ *   here → artifact   everything the office does: approve / reject, ack,
++ *                     done, snooze, wake, reopen, assign, comments
++ *
++ * Each item keeps `sync_base`: the shared fields as they last stood on BOTH
++ * sides. A field that differs from the base on one side only was changed on
++ * that side, so that side wins. That is what stops an hourly sync from quietly
++ * undoing an approval. Comments are never lost: both sides' comments are
++ * merged. If the same field was changed on both sides in the same hour, the
++ * office wins, except that "done" beats anything else, so a bot closing an
++ * item stays closed.
++ *
++ * `sync_base` moves only when both sides are known to match: straight away
++ * when nothing needs sending back, otherwise when the sync task confirms
++ * (POST /api/sync/ack) that it wrote the office's changes into the artifact.
++ * If that write fails, the change is simply sent again next hour.
++ */
++
++export const SHARED = [
++  "status",
++  "snoozeUntil",
++  "closedAt",
++  "verdict",
++  "verdictBy",
++  "verdictAt",
++  "acked",
++  "ackedBy",
++  "assignee",
++  "comments",
++];
++
++const KINDS = new Set(["decision", "draft", "alert", "info"]);
++const STATUSES = new Set(["open", "snoozed", "done"]);
++const VERDICTS = new Set(["approved", "rejected"]);
++
++let schemaReady = null;
++export function ensureSchema() {
++  if (!schemaReady) {
++    schemaReady = query(
++      `alter table items add column if not exists sync_base jsonb;
++       alter table items add column if not exists artifact_version integer;
++       alter table items add column if not exists synced_at timestamptz;`
++    ).catch((err) => {
++      schemaReady = null;
++      throw err;
++    });
++  }
++  return schemaReady;
++}
++
++function iso(v) {
++  if (!v) return null;
++  const t = Date.parse(v);
++  return isNaN(t) ? null : new Date(t).toISOString();
++}
++
++function str(v) {
++  return v == null || v === "" ? null : String(v);
++}
++
++function normComment(c) {
++  if (!c || typeof c !== "object" || !c.text) return null;
++  const out = {
++    at: iso(c.at) || new Date(0).toISOString(),
++    source: c.source === "bot" ? "bot" : "office",
++    text: String(c.text).slice(0, 4000),
++  };
++  const by = c.by || c.byName;
++  if (by) out.by = String(by);
++  if (c.byId) out.byId = String(c.byId);
++  return out;
++}
++
++function commentKey(c) {
++  return c.at.slice(0, 19) + "|" + c.text.trim().slice(0, 200);
++}
++
++export function mergeComments(...lists) {
++  const seen = new Map();
++  for (const list of lists) {
++    for (const raw of list || []) {
++      const c = normComment(raw);
++      if (!c) continue;
++      const k = commentKey(c);
++      const prev = seen.get(k);
++      seen.set(k, prev ? { ...c, ...prev, by: prev.by || c.by, byId: prev.byId || c.byId } : c);
++    }
++  }
++  return [...seen.values()]
++    .map((c) => {
++      const o = { ...c };
++      if (!o.by) delete o.by;
++      if (!o.byId) delete o.byId;
++      return o;
++    })
++    .sort((a, b) => a.at.localeCompare(b.at))
++    .slice(-40);
++}
++
++/** The shared fields of an item, normalized so the two sides compare equal. */
++export function shared(it) {
++  return {
++    status: STATUSES.has(it.status) ? it.status : "open",
++    snoozeUntil: iso(it.snoozeUntil),
++    closedAt: iso(it.closedAt),
++    verdict: VERDICTS.has(it.verdict) ? it.verdict : null,
++    verdictBy: str(it.verdictBy),
++    verdictAt: iso(it.verdictAt),
++    acked: Boolean(it.acked),
++    ackedBy: str(it.ackedBy),
++    assignee: str(it.assignee),
++    comments: mergeComments(it.comments),
++  };
++}
++
++function same(a, b) {
++  return JSON.stringify(a) === JSON.stringify(b);
++}
++
++export function sameShared(a, b) {
++  return SHARED.every((f) => same(a[f], b[f]));
++}
++
++/** Three-way merge: base = last agreed, a = artifact now, v = this app now. */
++export function merge3(base, a, v) {
++  const out = {};
++  for (const f of SHARED) {
++    if (f === "comments") continue;
++    if (same(a[f], base[f])) out[f] = v[f];
++    else if (same(v[f], base[f])) out[f] = a[f];
++    else out[f] = v[f]; // both changed: the office wins…
++  }
++  // …except that a close from either side sticks.
++  if (a.status === "done" && a.status !== base.status && v.status !== "done") {
++    out.status = "done";
++    out.closedAt = a.closedAt;
++  }
++  out.comments = mergeComments(a.comments, v.comments);
++  return out;
++}
++
++/** The bot-owned text of an item. The artifact is always right about these. */
++export function content(id, d) {
++  return {
++    id: String(id),
++    bot: String(d.bot || "unknown"),
++    botName: str(d.botName) || String(d.bot || "unknown"),
++    kind: KINDS.has(d.kind) ? d.kind : "decision",
++    priority: d.priority === "high" ? "high" : "normal",
++    title: String(d.title || "Untitled item").slice(0, 500),
++    detail: str(d.detail),
++    draft: str(d.draft),
++    draftChannel: str(d.draftChannel),
++    createdAt: iso(d.createdAt),
++  };
++}
++
++export async function writeRow(c, s, { base, version }) {
++  await query(
++    `insert into items
++       (id, bot, bot_name, kind, priority, title, detail, draft, draft_channel,
++        status, snooze_until, closed_at, verdict, verdict_by, verdict_at,
++        acked, acked_by, assignee, comments, created_at, updated_at,
++        sync_base, artifact_version, synced_at)
++     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
++             $19::jsonb, coalesce($20::timestamptz, now()), now(),
++             $21::jsonb, $22, now())
++     on conflict (id) do update set
++       bot = excluded.bot, bot_name = excluded.bot_name, kind = excluded.kind,
++       priority = excluded.priority, title = excluded.title,
++       detail = excluded.detail, draft = excluded.draft,
++       draft_channel = excluded.draft_channel, status = excluded.status,
++       snooze_until = excluded.snooze_until, closed_at = excluded.closed_at,
++       verdict = excluded.verdict, verdict_by = excluded.verdict_by,
++       verdict_at = excluded.verdict_at, acked = excluded.acked,
++       acked_by = excluded.acked_by, assignee = excluded.assignee,
++       comments = excluded.comments, created_at = excluded.created_at,
++       sync_base = coalesce(excluded.sync_base, items.sync_base),
++       artifact_version = excluded.artifact_version,
++       synced_at = now(), updated_at = now()`,
++    [
++      c.id, c.bot, c.botName, c.kind, c.priority, c.title, c.detail, c.draft,
++      c.draftChannel, s.status, s.snoozeUntil, s.closedAt, s.verdict,
++      s.verdictBy, s.verdictAt, s.acked, s.ackedBy, s.assignee,
++      JSON.stringify(s.comments), c.createdAt,
++      base ? JSON.stringify(base) : null, version,
++    ]
++  );
++}
++
++/** Shared fields shaped for the artifact's database (its page reads byName). */
++export function forArtifact(s) {
++  return {
++    ...s,
++    comments: s.comments.map((c) => (c.by ? { ...c, byName: c.by } : c)),
++  };
++}
++
++export function sharedFromRow(row) {
++  return shared(rowToItem(row));
++}
+-- 
+2.43.0
+
